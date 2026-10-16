@@ -1,0 +1,19 @@
+{
+  "name": "JLPT Listening Studio",
+  "short_name": "JLPT 精听",
+  "description": "本地优先的 JLPT N1 日语精听播放器",
+  "lang": "zh-CN",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#edf1ed",
+  "theme_color": "#132c2b",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

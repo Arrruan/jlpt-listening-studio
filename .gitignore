@@ -1,0 +1,13 @@
+node_modules
+dist
+*.local
+*.tsbuildinfo
+.vite
+coverage
+*.log
+.venv/
+__pycache__/
+.pytest_cache/
+backend/data/uploads/
+backend/data/results/
+backend/data/models/
