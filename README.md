@@ -97,6 +97,8 @@ audio/<audioAssetId>.<扩展名>
 
 仓库包含 `.github/workflows/deploy-pages.yml`。推送到 `main` 后，GitHub Actions 会运行前端测试、构建 `dist`，再通过 GitHub Pages 官方 Actions 发布 PWA。工作流只上传构建后的网页程序；`Listen/`、Whisper 模型、转录结果和 `.jlpt.zip` 题库包均被 `.gitignore` 排除，不会发布到公开网站。
 
+正式地址：<https://arrruan.github.io/jlpt-listening-studio/>
+
 部署完成后，在手机浏览器打开 Pages 地址：Android Chrome 可选择“安装应用”或“添加到主屏幕”；iPhone/iPad Safari 可选择“共享 → 添加到主屏幕”。随后把 `backend\data\library_packages\*.jlpt.zip` 私下传到手机，在应用首页选择“手动安装其他 ZIP”。题库和作答记录只保存在该手机浏览器中，不会上传到 GitHub，也不会与电脑自动同步。
 
 ## 当前测试
