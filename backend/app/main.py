@@ -8,10 +8,12 @@ import uuid
 from pathlib import Path
 from typing import Annotated, Literal
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 
 from .jobs import JobManager
+from .library_builder import list_prepared_packages
 from .schemas import HealthResponse, JobSnapshot, TranscriptionResult
 
 
@@ -22,9 +24,9 @@ MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024
 
 manager = JobManager(DATA_ROOT)
 app = FastAPI(
-    title="JLPT Listening Studio Local AI",
-    version="2.0.0",
-    description="Local-only faster-whisper transcription and conservative JLPT structure suggestions.",
+    title="JLPT Listening Studio Local Resource Service",
+    version="3.0.0",
+    description="Loopback-only Listen-folder preparation, package delivery, and local faster-whisper transcription.",
 )
 app.add_middleware(
     CORSMiddleware,
@@ -34,7 +36,7 @@ app.add_middleware(
         "http://localhost:4173",
         "http://127.0.0.1:4173",
     ],
-    allow_origin_regex=r"^http://192\.168\.\d{1,3}\.\d{1,3}:5173$",
+    allow_origin_regex=r"^http://(?:localhost|127\.0\.0\.1):\d+$",
     allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],
 )
@@ -54,6 +56,39 @@ def health() -> HealthResponse:
         fasterWhisper=_version("faster-whisper"),
         ctranslate2=_version("ctranslate2"),
         modelsLoaded=manager.transcriber.loaded_models,
+    )
+
+
+def _require_loopback_browser(request: Request) -> None:
+    origin = request.headers.get('origin', '')
+    client = request.client.host if request.client else ''
+    if client not in {'127.0.0.1', '::1'} or not re.fullmatch(r'http://(?:localhost|127\.0\.0\.1):\d+', origin):
+        raise HTTPException(status_code=403, detail='Local library access is restricted to this computer')
+
+
+@app.get('/api/local-library/packages')
+def local_library_packages(request: Request) -> list[dict[str, object]]:
+    """List packages prepared from the ignored, machine-local Listen directory."""
+    _require_loopback_browser(request)
+    return list_prepared_packages(DATA_ROOT)
+
+
+@app.get('/api/local-library/packages/{package_id}')
+def download_local_library_package(package_id: str, request: Request) -> FileResponse:
+    _require_loopback_browser(request)
+    resource = next((item for item in list_prepared_packages(DATA_ROOT) if item.get('id') == package_id), None)
+    if not resource or resource.get('status') != 'ready':
+        raise HTTPException(status_code=404, detail='Unknown local library package')
+    package_file = str(resource.get('packageFile', ''))
+    package_root = (DATA_ROOT / 'library_packages').resolve()
+    package_path = (package_root / package_file).resolve()
+    if not package_path.is_file() or package_path.parent != package_root:
+        raise HTTPException(status_code=404, detail='Local library package is missing')
+    return FileResponse(
+        package_path,
+        media_type='application/zip',
+        filename=f'{package_id}.jlpt.zip',
+        headers={'Cache-Control': 'no-store'},
     )
 
 

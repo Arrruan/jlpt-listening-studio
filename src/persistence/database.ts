@@ -1,10 +1,13 @@
 import type { WorkspaceState } from '../types'
+import type { LibraryState } from '../library/types'
 
 const DATABASE_NAME = 'jlpt-listening-studio'
-const DATABASE_VERSION = 1
+const DATABASE_VERSION = 2
 const WORKSPACE_STORE = 'workspace'
 const AUDIO_STORE = 'audio-blobs'
+const LIBRARY_STORE = 'exam-library'
 const WORKSPACE_KEY = 'current'
+const LIBRARY_KEY = 'current'
 
 let databasePromise: Promise<IDBDatabase> | null = null
 
@@ -35,6 +38,9 @@ const openDatabase = () => {
       if (!database.objectStoreNames.contains(AUDIO_STORE)) {
         database.createObjectStore(AUDIO_STORE)
       }
+      if (!database.objectStoreNames.contains(LIBRARY_STORE)) {
+        database.createObjectStore(LIBRARY_STORE)
+      }
     }
     request.onsuccess = () => resolve(request.result)
     request.onerror = () => reject(request.error ?? new Error('无法打开本地数据库'))
@@ -58,10 +64,31 @@ export const saveWorkspace = async (workspace: WorkspaceState): Promise<void> =>
   await transactionDone(transaction)
 }
 
+export const loadLibraryState = async (): Promise<unknown> => {
+  const database = await openDatabase()
+  const transaction = database.transaction(LIBRARY_STORE, 'readonly')
+  return requestResult<unknown>(transaction.objectStore(LIBRARY_STORE).get(LIBRARY_KEY))
+}
+
+export const saveLibraryState = async (library: LibraryState): Promise<void> => {
+  const database = await openDatabase()
+  const transaction = database.transaction(LIBRARY_STORE, 'readwrite')
+  transaction.objectStore(LIBRARY_STORE).put(library, LIBRARY_KEY)
+  await transactionDone(transaction)
+}
+
 export const saveAudioBlob = async (assetId: string, blob: Blob): Promise<void> => {
   const database = await openDatabase()
   const transaction = database.transaction(AUDIO_STORE, 'readwrite')
   transaction.objectStore(AUDIO_STORE).put(blob, assetId)
+  await transactionDone(transaction)
+}
+
+export const saveAudioBlobs = async (audio: Map<string, Blob>): Promise<void> => {
+  const database = await openDatabase()
+  const transaction = database.transaction(AUDIO_STORE, 'readwrite')
+  const store = transaction.objectStore(AUDIO_STORE)
+  audio.forEach((blob, assetId) => store.put(blob, assetId))
   await transactionDone(transaction)
 }
 

@@ -1,10 +1,12 @@
 {
   "name": "jlpt-listening-studio",
   "private": true,
-  "version": "2.0.0",
+  "version": "3.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --host 0.0.0.0",
+    "dev": "node scripts/dev.mjs",
+    "dev:web": "vite --host 127.0.0.1",
+    "prepare:listen": ".venv\\Scripts\\python.exe -m backend.app.prepare_library --listen-root Listen --data-root backend/data --model-size small",
     "dev:api": ".venv\\Scripts\\python.exe -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8765",
     "dev:api:reload": ".venv\\Scripts\\python.exe -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8765 --reload",
     "build": "tsc -b && vite build",
@@ -20,6 +22,7 @@
     "react-dom": "^19.2.0"
   },
   "devDependencies": {
+    "@types/node": "^26.6.5",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
     "@vitejs/plugin-react": "^5.0.4",

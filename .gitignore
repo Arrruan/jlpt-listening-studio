@@ -4,6 +4,7 @@ dist
 *.tsbuildinfo
 .vite
 coverage
+Listen/
 *.log
 .venv/
 __pycache__/
@@ -11,3 +12,5 @@ __pycache__/
 backend/data/uploads/
 backend/data/results/
 backend/data/models/
+backend/data/library_packages/
+backend/data/.prepare-library.lock

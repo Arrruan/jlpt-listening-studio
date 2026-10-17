@@ -5,6 +5,8 @@ import type { LoopCount, LoopRange } from '../types'
 interface StartLoopOptions {
   a: number
   b: number
+  /** Start inside the range after a user seek; subsequent cycles still restart at A. */
+  startAt?: number
   count?: LoopCount
   pauseMs?: number
 }
@@ -43,6 +45,8 @@ export const useAudioEngine = () => {
   const boundaryBusyRef = useRef(false)
   const timerRef = useRef<number | null>(null)
   const rafRef = useRef<number | null>(null)
+  const pendingLoopRef = useRef<StartLoopOptions | null>(null)
+  const startLoopRef = useRef<(options: StartLoopOptions) => Promise<boolean>>(async () => false)
 
   useEffect(() => {
     loopRef.current = loop
@@ -131,11 +135,22 @@ export const useAudioEngine = () => {
       }
       if (!audio.paused) rafRef.current = window.requestAnimationFrame(tick)
     }
-    const onLoadedMetadata = () => {
+    const acceptDuration = () => {
       const finiteDuration = Number.isFinite(audio.duration) ? audio.duration : 0
+      if (finiteDuration <= 0) return false
+      durationRef.current = finiteDuration
       setDuration(finiteDuration)
-      setCurrentTime(audio.currentTime)
       setReady(true)
+      const pending = pendingLoopRef.current
+      if (pending) {
+        pendingLoopRef.current = null
+        void startLoopRef.current(pending)
+      }
+      return true
+    }
+    const onLoadedMetadata = () => {
+      acceptDuration()
+      setCurrentTime(audio.currentTime)
       setError(null)
     }
     const onTimeUpdate = () => {
@@ -160,12 +175,13 @@ export const useAudioEngine = () => {
       setCurrentTime(audio.duration || 0)
     }
     const onError = () => {
+      pendingLoopRef.current = null
       const detail = audio.error?.message || '音频解码失败，请确认文件格式受浏览器支持。'
       setError(detail)
       setReady(false)
     }
     const onDurationChange = () => {
-      if (Number.isFinite(audio.duration)) setDuration(audio.duration)
+      acceptDuration()
     }
 
     audio.addEventListener('loadedmetadata', onLoadedMetadata)
@@ -197,6 +213,8 @@ export const useAudioEngine = () => {
     audio.load()
     setReady(false)
     setDuration(0)
+    durationRef.current = 0
+    pendingLoopRef.current = null
     setCurrentTime(0)
     setCompletedCycles(0)
     completedRef.current = 0
@@ -220,6 +238,8 @@ export const useAudioEngine = () => {
     setSourceUrl(null)
     setFileName('')
     setDuration(0)
+    durationRef.current = 0
+    pendingLoopRef.current = null
     setCurrentTime(0)
     setReady(false)
     setError(null)
@@ -229,6 +249,7 @@ export const useAudioEngine = () => {
 
   const pause = useCallback(() => {
     clearWaiting()
+    pendingLoopRef.current = null
     audioRef.current?.pause()
   }, [clearWaiting])
 
@@ -263,14 +284,28 @@ export const useAudioEngine = () => {
     await safePlay()
   }, [clearWaiting, currentTime, safePlay])
 
-  const startLoop = useCallback(async ({ a, b, count, pauseMs }: StartLoopOptions) => {
-    if (!isValidLoopRange(a, b, durationRef.current)) {
+  const startLoop = useCallback(async (options: StartLoopOptions) => {
+    const { a, b, startAt, count, pauseMs } = options
+    const audio = audioRef.current
+    if (!audio?.src) {
+      setError('当前材料的音频尚未载入。')
+      return false
+    }
+    if (!Number.isFinite(a) || !Number.isFinite(b) || a < 0 || b <= a) {
       setError('循环区间无效：B 点必须晚于 A 点，且不能超过音频时长。')
       return false
     }
     clearWaiting()
-    const audio = audioRef.current
-    if (!audio) return false
+    if (durationRef.current <= 0) {
+      pendingLoopRef.current = options
+      setError(null)
+      return true
+    }
+    if (!isValidLoopRange(a, b, durationRef.current)) {
+      setError('循环区间无效：B 点必须晚于 A 点，且不能超过音频时长。')
+      return false
+    }
+    pendingLoopRef.current = null
     const nextLoop: LoopRange = {
       a,
       b,
@@ -282,10 +317,15 @@ export const useAudioEngine = () => {
     setLoopState(nextLoop)
     completedRef.current = 0
     setCompletedCycles(0)
-    audio.currentTime = a
-    setCurrentTime(a)
+    const initialTime = startAt !== undefined && startAt >= a && startAt < b ? startAt : a
+    audio.currentTime = initialTime
+    setCurrentTime(initialTime)
     return safePlay()
   }, [clearWaiting, safePlay])
+
+  useEffect(() => {
+    startLoopRef.current = startLoop
+  }, [startLoop])
 
   const setLoopPoint = useCallback((point: 'a' | 'b') => {
     const value = currentTime
@@ -308,6 +348,7 @@ export const useAudioEngine = () => {
 
   const cancelLoop = useCallback(() => {
     clearWaiting()
+    pendingLoopRef.current = null
     setLoopState((previous) => ({ ...previous, enabled: false }))
     loopRef.current = { ...loopRef.current, enabled: false }
     completedRef.current = 0

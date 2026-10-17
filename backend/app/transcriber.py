@@ -39,7 +39,9 @@ class WhisperTranscriber:
                 return self._models[model_size]
             from faster_whisper import WhisperModel
 
-            cpu_threads = max(1, min(8, os.cpu_count() or 4))
+            configured_threads = os.getenv("JLPT_WHISPER_CPU_THREADS")
+            default_threads = max(1, min(4, (os.cpu_count() or 4) // 2))
+            cpu_threads = max(1, int(configured_threads)) if configured_threads else default_threads
             model = WhisperModel(
                 model_size,
                 device="cpu",

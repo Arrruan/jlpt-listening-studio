@@ -1,7 +1,7 @@
 {
   "name": "JLPT Listening Studio",
   "short_name": "JLPT 精听",
-  "description": "本地优先的 JLPT N1 日语精听播放器",
+  "description": "本地优先的 JLPT N1 自由练习与逐句精听软件",
   "lang": "zh-CN",
   "start_url": "./",
   "scope": "./",
