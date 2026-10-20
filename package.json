@@ -14,7 +14,10 @@
     "test": "vitest run",
     "test:api": ".venv\\Scripts\\python.exe -m pytest -q backend/tests",
     "test:watch": "vitest",
-    "typecheck": "tsc -b --pretty false"
+    "typecheck": "tsc -b --pretty false",
+    "cloud:prepare": "node scripts/prepare-cloud-library.mjs",
+    "cloud:upload": "node scripts/upload-cloud-library.mjs",
+    "deploy:cloud": "npm run build && wrangler deploy"
   },
   "dependencies": {
     "jszip": "^3.10.1",
@@ -25,9 +28,11 @@
     "@types/node": "^26.6.5",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
+    "@cloudflare/workers-types": "^5.20261019.1",
     "@vitejs/plugin-react": "^5.0.4",
     "typescript": "^5.9.3",
     "vite": "^7.1.12",
-    "vitest": "^5.0.4"
+    "vitest": "^5.0.4",
+    "wrangler": "^4.151.3"
   }
 }

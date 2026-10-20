@@ -1,10 +1,10 @@
-# JLPT Listening Studio — 学习端 V3
+# JLPT Listening Studio — 私人云端学习端 V4
 
-本地优先的 JLPT N1 听力学习软件。普通使用流程只有：选择已安装试卷、按题练习并作答、需要时进入逐句精听。学习端不显示音频上传、AI 转录、手动分句或题库编辑器。
+面向个人使用的 JLPT N1 听力学习软件。普通使用流程只有：从私人题库选择试卷、按题练习并作答、需要时进入逐句精听。学习端不显示音频上传、AI 转录、手动分句或题库编辑器。
 
-项目不使用登录、云数据库或收费 API。题库、音频和作答记录保存在当前浏览器的 IndexedDB；PWA 应用壳可缓存供离线打开。真实真题音频不会自动提交到 Git 或任何公共服务。
+正式学习端由 Cloudflare Access 保护，试卷音频存放在私有 R2 存储桶并支持 HTTP Range 流式播放。浏览器只在 IndexedDB 保存作答、偏好和已读取的文字结构，不再要求电脑和手机分别安装整套音频。项目不使用云数据库或收费 AI API；真实真题音频不会提交到 GitHub 或公开静态网站。
 
-## 当前版本启动
+## 本机制作与开发
 
 Windows PowerShell：
 
@@ -85,25 +85,48 @@ audio/<audioAssetId>.<扩展名>
 
 当前阶段没有把题库制作编辑器暴露给普通用户。自动识别结果明确标记为“自动识别 · 待校对”；规则无法确认的材料会保留为待确认入口，且不会编造选项、正确答案或评分。手机不运行 Python：需要把本机生成的 `.jlpt.zip` 传到手机后，在首页安装一次。现有 `src/persistence/examPackage.ts` 负责完整校验和读取。
 
-## 本地存储和离线限制
+## 云端播放、本地记录和离线限制
 
-- 音频 Blob 存在 IndexedDB，不依赖刷新后失效的 Object URL。
-- 应用会请求持久存储，但浏览器可以拒绝；设备空间紧张、清除站点数据、无痕/私密浏览或卸载浏览器都可能删除题库。
-- `localhost`、局域网地址和 GitHub Pages 是不同站点，各有独立存储；电脑和手机需分别安装题库包。
-- ZIP 解压在浏览器内存中完成，低内存手机处理超大整卷可能失败；包和原始音频应另行备份。
-- Service Worker 只在生产构建注册。首次联网打开后可缓存应用壳；题库音频仍由 IndexedDB 管理。
+- Cloudflare 版本的音频由私有 R2 按区间传输，不写入 IndexedDB；拖动进度、Passage 播放和单句循环均使用同一远程音频。
+- 浏览器仍可能按自身策略临时缓冲少量媒体字节，但不会安装整套音频；清除站点数据会删除作答记录和偏好，不会删除 R2 音频。
+- 正式题库播放需要联网并通过 Cloudflare Access 登录。PWA 应用壳和已读取的文字结构可以保留，但不承诺音频离线播放。
+- 手动导入 ZIP 的兼容模式仍把音频保存到 IndexedDB，受浏览器配额和系统清理策略影响。
+- `localhost`、GitHub Pages 和 Cloudflare Worker 是不同站点，各有独立作答记录。
+
+## Cloudflare 私有部署
+
+Cloudflare 资源使用一个私有 R2 存储桶 `jlpt-listening-private` 和一个 Worker。Worker 同源提供 PWA、轻量题库元数据及 `/api/media/*` 音频接口；R2 不启用 `r2.dev`、Public access 或自定义公开域名。
+
+本机维护命令：
+
+```powershell
+npm run cloud:prepare
+npm run deploy:cloud
+npm run cloud:upload
+```
+
+`cloud:prepare` 从已生成的 `.jlpt.zip` 读取 `exam.json`，把 AudioAsset 改为受保护的远程路径，并建立上传清单；它不会复制 650 MB 原音频。`.cloudflare-library/` 是 Git 忽略的临时发布目录。`cloud:upload` 使用 Wrangler 浏览器 OAuth 上传 `Listen/` 中的原文件，不需要创建或粘贴 API Token，并在每个对象成功后记录可续传状态。
+
+安全发布顺序必须是：
+
+1. 先运行 `npm run deploy:cloud`，只发布网页和 Worker，不上传题库。
+2. 在 Cloudflare Dashboard 为生成的 `*.workers.dev` 生产地址启用 Access，只允许指定邮箱。
+3. 使用退出登录/无痕窗口确认未授权访问会进入 Cloudflare 登录页。
+4. 最后运行 `npm run cloud:upload`。上传器先传音频和各卷元数据，最后才发布 `library/catalog.json`，避免页面提前展示未上传完的试卷。
+
+Worker 对 HTMLAudioElement 的单区间 `Range` 请求返回 `206` 和正确的 `Content-Range`，无效或越界区间返回 `416`。Service Worker 明确绕过 `/api/library/*` 与 `/api/media/*`，不会把整套音频写进应用缓存。
 
 ## GitHub Pages 与手机安装
 
 仓库包含 `.github/workflows/deploy-pages.yml`。推送到 `main` 后，GitHub Actions 会运行前端测试、构建 `dist`，再通过 GitHub Pages 官方 Actions 发布 PWA。工作流只上传构建后的网页程序；`Listen/`、Whisper 模型、转录结果和 `.jlpt.zip` 题库包均被 `.gitignore` 排除，不会发布到公开网站。
 
-正式地址：<https://arrruan.github.io/jlpt-listening-studio/>
+公开演示地址：<https://arrruan.github.io/jlpt-listening-studio/>
 
-部署完成后，在手机浏览器打开 Pages 地址：Android Chrome 可选择“安装应用”或“添加到主屏幕”；iPhone/iPad Safari 可选择“共享 → 添加到主屏幕”。随后把 `backend\data\library_packages\*.jlpt.zip` 私下传到手机，在应用首页选择“手动安装其他 ZIP”。题库和作答记录只保存在该手机浏览器中，不会上传到 GitHub，也不会与电脑自动同步。
+GitHub Pages 只发布开源程序和演示数据，不包含真题音频。正式 Cloudflare 地址部署并加锁后，手机浏览器登录一次即可查看私人题库并流式播放：Android Chrome 可选择“安装应用”或“添加到主屏幕”；iPhone/iPad Safari 可选择“共享 → 添加到主屏幕”。作答记录仍只保存在各设备浏览器中，不会自动同步。
 
 ## 当前测试
 
-前端 26 项自动化测试覆盖原有 A–B 循环和句子操作，以及学习端的题目顺序、共享 Passage 不重载、独立答案、精听返回题号、缺少标准答案不评分、清除记录、题库包校验/读取、修正版题库升级和 Windows Chromium 大包下载回归。后端 18 项测试覆盖转录分类、自动题库生成、共用材料、未知材料占位、未分类句子保留、批处理中单文件失败隔离和本机接口限制。HTMLAudioElement 的系统音量和移动浏览器手势限制仍需用目标设备手动验证。
+前端 32 项自动化测试覆盖原有 A–B 循环和句子操作、学习端核心流程、题库包校验、云端目录/元数据校验，以及 R2 固定区间、开放区间、后缀区间和 `416` 边界逻辑。后端 18 项测试覆盖转录分类、自动题库生成、共用材料、未知材料占位、未分类句子保留、批处理中单文件失败隔离和本机接口限制。HTMLAudioElement、Cloudflare Access 登录和移动浏览器手势限制仍需在正式地址用目标设备手动验证。
 
 ## 附录：历史 V2 制作端记录
 

@@ -106,7 +106,9 @@ export interface LibraryAudioAsset {
   mimeType: string
   size: number
   duration: number
-  storageMode: 'indexeddb'
+  /** Remote assets are streamed from the same protected Cloudflare origin. */
+  storageMode: 'indexeddb' | 'remote'
+  remotePath?: string
   availability: 'available' | 'missing'
   lastError?: string
 }

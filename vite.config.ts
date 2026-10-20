@@ -88,7 +88,7 @@ export default defineConfig({
     host: '127.0.0.1',
   },
   test: {
-    include: ['src/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'worker/**/*.test.ts'],
     environment: 'node',
     coverage: { reporter: ['text', 'html'] },
   },

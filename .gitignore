@@ -14,3 +14,5 @@ backend/data/results/
 backend/data/models/
 backend/data/library_packages/
 backend/data/.prepare-library.lock
+.cloudflare-library/
+.wrangler/

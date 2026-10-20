@@ -29,6 +29,13 @@ import {
   saveLibraryState,
 } from './persistence/database'
 import { readExamPackage } from './persistence/examPackage'
+import {
+  discoverCloudLibrary,
+  downloadCloudExam,
+  isCloudExamCurrent,
+  resolveRemoteAudioPath,
+} from './persistence/cloudLibrary'
+import type { CloudExamResource } from './persistence/cloudLibrary'
 import { migrateLibraryState } from './persistence/libraryMigrations'
 import { discoverLocalPackages, downloadLocalPackage, isLocalPackageCurrent } from './persistence/localLibrary'
 import type { LocalPreparedPackage } from './persistence/localLibrary'
@@ -119,6 +126,9 @@ export default function LearnerApp() {
   const [storage, setStorage] = useState<{ usage: number; quota: number }>()
   const [localPackages, setLocalPackages] = useState<LocalPreparedPackage[]>([])
   const [localSyncState, setLocalSyncState] = useState<'checking' | 'connected' | 'offline'>('checking')
+  const [cloudPackages, setCloudPackages] = useState<CloudExamResource[]>([])
+  const [cloudSyncState, setCloudSyncState] = useState<'checking' | 'connected' | 'offline'>('checking')
+  const [openingCloudExamId, setOpeningCloudExamId] = useState<string>()
   const engine = useAudioEngine()
   const packageInputRef = useRef<HTMLInputElement | null>(null)
   const objectUrlRef = useRef<string | null>(null)
@@ -206,6 +216,27 @@ export default function LearnerApp() {
   useEffect(() => {
     if (!hydrated) return
     let cancelled = false
+    const syncCloud = async () => {
+      try {
+        const catalog = await discoverCloudLibrary()
+        if (cancelled) return
+        setCloudPackages(catalog.exams)
+        setCloudSyncState('connected')
+      } catch {
+        if (!cancelled) setCloudSyncState('offline')
+      }
+    }
+    void syncCloud()
+    const timer = window.setInterval(() => void syncCloud(), 60_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [hydrated])
+
+  useEffect(() => {
+    if (!hydrated) return
+    let cancelled = false
     const sync = async () => {
       try {
         const resources = await discoverLocalPackages()
@@ -254,10 +285,10 @@ export default function LearnerApp() {
     document.documentElement.dataset.theme = library.preferences.theme
   }, [library.preferences.theme])
 
-  const activateAudio = useCallback((assetId: string, blob: Blob, name: string, initialPosition: number) => {
+  const activateAudio = useCallback((sourceKey: string, blob: Blob, name: string, initialPosition: number) => {
     if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current)
     objectUrlRef.current = URL.createObjectURL(blob)
-    loadedAssetIdRef.current = assetId
+    loadedAssetIdRef.current = sourceKey
     pendingInitialPositionRef.current = initialPosition
     engine.loadSource(objectUrlRef.current, name)
   }, [engine.loadSource])
@@ -268,12 +299,29 @@ export default function LearnerApp() {
       engine.pause()
       return
     }
-    if (loadedAssetIdRef.current === activeAudioAssetId) return
+    const sourceKey = `${activeAudioAssetId}:${asset.storageMode}:${asset.remotePath ?? ''}`
+    if (loadedAssetIdRef.current === sourceKey) return
     const support = document.createElement('audio').canPlayType(asset.mimeType)
     if (!support && asset.mimeType) {
       engine.clearSource()
-      loadedAssetIdRef.current = activeAudioAssetId
+      loadedAssetIdRef.current = sourceKey
       setNotice({ tone: 'error', text: `当前浏览器不支持 ${asset.mimeType}，请改用兼容的 MP3、M4A 或 MP4 音频包。` })
+      return
+    }
+    if (asset.storageMode === 'remote') {
+      if (!asset.remotePath) {
+        engine.clearSource()
+        loadedAssetIdRef.current = sourceKey
+        setNotice({ tone: 'error', text: `“${asset.name}”缺少云端音频地址。` })
+        return
+      }
+      if (objectUrlRef.current) {
+        URL.revokeObjectURL(objectUrlRef.current)
+        objectUrlRef.current = null
+      }
+      loadedAssetIdRef.current = sourceKey
+      pendingInitialPositionRef.current = passage.start
+      engine.loadSource(resolveRemoteAudioPath(asset.remotePath), asset.name)
       return
     }
     let cancelled = false
@@ -283,7 +331,7 @@ export default function LearnerApp() {
         if (cancelled) return
         if (!blob) {
           engine.clearSource()
-          loadedAssetIdRef.current = activeAudioAssetId
+          loadedAssetIdRef.current = sourceKey
           setLibrary((previous) => ({
             ...previous,
             audioAssets: { ...previous.audioAssets, [activeAudioAssetId]: { ...previous.audioAssets[activeAudioAssetId], availability: 'missing', lastError: 'IndexedDB 中没有音频文件。' } },
@@ -291,7 +339,7 @@ export default function LearnerApp() {
           setNotice({ tone: 'error', text: `找不到“${asset.name}”的本地音频，请重新安装该题库包。` })
           return
         }
-        activateAudio(activeAudioAssetId, blob, asset.name, passage.start)
+        activateAudio(sourceKey, blob, asset.name, passage.start)
       } catch (error) {
         if (!cancelled) setNotice({ tone: 'error', text: `读取本机音频失败：${error instanceof Error ? error.message : '未知错误'}` })
       }
@@ -327,6 +375,28 @@ export default function LearnerApp() {
       setLibrary(next)
     } catch (error) {
       setNotice({ tone: 'error', text: error instanceof Error ? error.message : '无法打开这套试卷。' })
+    }
+  }
+
+  const handleOpenCloudExam = async (resource: CloudExamResource) => {
+    if (openingCloudExamId) return
+    setOpeningCloudExamId(resource.examId)
+    try {
+      let next = libraryRef.current
+      if (!isCloudExamCurrent(resource, next.exams[resource.examId], next)) {
+        const payload = await downloadCloudExam(resource)
+        next = installExamPackage(next, payload)
+      }
+      next = openExam(next, resource.examId)
+      engine.pause()
+      engine.cancelLoop()
+      libraryRef.current = next
+      setLibrary(next)
+      await saveLibraryState(next)
+    } catch (error) {
+      setNotice({ tone: 'error', text: `打开云端试卷失败：${error instanceof Error ? error.message : '未知错误'}` })
+    } finally {
+      setOpeningCloudExamId(undefined)
     }
   }
 
@@ -486,6 +556,7 @@ export default function LearnerApp() {
   const processingLocal = localPackages.find((item) => item.status === 'processing')
   const queuedLocalCount = localPackages.filter((item) => item.status === 'queued').length
   const failedLocalCount = localPackages.filter((item) => item.status === 'failed').length
+  const cloudExamIds = new Set(cloudPackages.map((item) => item.examId))
 
   if (!hydrated) {
     return <main className="loading-screen"><div className="brand-symbol">聴</div><strong>正在读取本地题库…</strong></main>
@@ -511,40 +582,60 @@ export default function LearnerApp() {
         <main className="library-page">
           <section className="library-hero">
             <div>
-              <span className="kicker">本机试卷库</span>
+              <span className="kicker">私人云端试卷库</span>
               <h1>选择一套试卷，马上开始练习</h1>
-              <p>按题自由播放、选择答案；需要时进入逐句精听。题库与作答记录仅保存在当前浏览器。</p>
+              <p>按题自由播放、选择答案；需要时进入逐句精听。音频从私人云端按需播放，作答记录只保存在当前浏览器。</p>
             </div>
             <div className="install-card">
-              <div className={`local-sync-status ${localSyncState}`}>
-                <span>{localSyncState === 'connected' ? '●' : localSyncState === 'checking' ? '◌' : '○'}</span>
+              <div className={`local-sync-status ${cloudSyncState}`}>
+                <span>{cloudSyncState === 'connected' ? '●' : cloudSyncState === 'checking' ? '◌' : '○'}</span>
                 <div>
-                  <strong>{localSyncState === 'connected' ? 'Listen 自动同步已连接' : localSyncState === 'checking' ? '正在检查 Listen 资源' : '本机资源服务未启动'}</strong>
-                  <small>{localSyncState === 'connected'
-                    ? processingLocal
-                      ? `已完成 ${readyLocalCount} / ${localPackages.length}；正在处理 ${processingLocal.position ?? readyLocalCount + 1} / ${processingLocal.total ?? localPackages.length}，另有 ${queuedLocalCount} 份等待。${failedLocalCount ? ` ${failedLocalCount} 份失败。` : ''}`
-                      : `已完成 ${readyLocalCount} / ${localPackages.length} 份本机题库。${failedLocalCount ? ` ${failedLocalCount} 份处理失败。` : ''}`
-                    : localSyncState === 'offline'
-                      ? '运行 npm run dev 后会自动处理和安装；已安装试卷仍可离线使用。'
-                      : '无需选择音频或手动运行 AI。'}</small>
+                  <strong>{cloudSyncState === 'connected' ? '私人云端题库已连接' : cloudSyncState === 'checking' ? '正在连接云端题库' : '当前使用本地题库'}</strong>
+                  <small>{cloudSyncState === 'connected'
+                    ? `${cloudPackages.length} 套试卷可直接打开，音频无需安装到设备。`
+                    : cloudSyncState === 'offline'
+                      ? '云端暂不可用；已打开过的题目结构和作答记录仍保存在本机。'
+                      : '正在读取题库目录…'}</small>
                 </div>
               </div>
+              {localSyncState === 'connected' && <small>维护模式：Listen 已完成 {readyLocalCount} / {localPackages.length} 份。{processingLocal ? `正在处理第 ${processingLocal.position ?? readyLocalCount + 1} 份，另有 ${queuedLocalCount} 份等待。` : ''}{failedLocalCount ? ` ${failedLocalCount} 份失败。` : ''}</small>}
               <input ref={packageInputRef} type="file" accept=".zip,application/zip" hidden onChange={(event) => void handlePackage(event.target.files?.[0])} />
               <button className="install-button" onClick={() => packageInputRef.current?.click()} disabled={packageProgress.busy}>
                 {packageProgress.busy ? '正在安装…' : '手动安装其他 ZIP'}
               </button>
               {packageProgress.busy && <><progress value={packageProgress.value} max={1} /><small>{packageProgress.message}</small></>}
-              <small>ZIP 内的音频会保存到 IndexedDB，不依赖临时文件地址。</small>
+              <small>手动安装的 ZIP 会保存在本机；云端题库的音频只会按需流式读取。</small>
             </div>
           </section>
 
           <section className="exam-library" aria-labelledby="installed-heading">
             <div className="section-heading">
-              <div><span className="kicker">Installed</span><h2 id="installed-heading">已安装试卷</h2></div>
-              <span>{Object.keys(library.exams).length} 套</span>
+              <div><span className="kicker">Library</span><h2 id="installed-heading">可用试卷</h2></div>
+              <span>{cloudPackages.length || Object.keys(library.exams).length} 套</span>
             </div>
             <div className="exam-grid">
+              {[...cloudPackages]
+                .sort((left, right) => (right.year ?? 0) - (left.year ?? 0) || (right.month ?? 0) - (left.month ?? 0))
+                .map((item) => {
+                  const installed = library.exams[item.examId]
+                  const answers = library.learning[item.examId]?.answers ?? {}
+                  const answered = Object.values(answers).filter((entry) => entry.selectedChoiceId).length
+                  const busy = openingCloudExamId === item.examId
+                  return (
+                    <article className="exam-card" key={item.examId}>
+                      <div className="exam-cover"><span>N1</span><strong>{item.year ?? 'N1'}</strong><small>{item.month ? `${item.month}月` : '题库'}</small></div>
+                      <div className="exam-card-body">
+                        <div className="exam-tags"><span>私人云端</span><span>{item.sectionCount} 个大题</span></div>
+                        <h3>{item.title}</h3>
+                        <p>{item.questionCount} 个练习入口 · 已作答 {answered} 道</p>
+                        <div className="completion-bar"><span style={{ width: `${item.questionCount ? answered / item.questionCount * 100 : 0}%` }} /></div>
+                        <button className="primary" onClick={() => void handleOpenCloudExam(item)} disabled={Boolean(openingCloudExamId)}>{busy ? '正在读取题目…' : installed && answered ? '继续练习' : '打开试卷'}</button>
+                      </div>
+                    </article>
+                  )
+                })}
               {Object.values(library.exams)
+                .filter((item) => !cloudExamIds.has(item.id))
                 .sort((left, right) => (right.year ?? 0) - (left.year ?? 0) || (right.month ?? 0) - (left.month ?? 0))
                 .map((item) => {
                   const questions = orderedExamQuestions(library, item.id)
@@ -567,8 +658,8 @@ export default function LearnerApp() {
           </section>
 
           <aside className="local-storage-note">
-            <strong>本地与离线</strong>
-            <p>PWA 页面缓存可离线打开，但题库音频受浏览器存储配额和系统清理策略影响。不要清除本站数据；重要题库包请另行保留。</p>
+            <strong>云端音频与本地记录</strong>
+            <p>试卷音频保存在受保护的 Cloudflare R2 中，播放时需要联网；浏览器只保存作答进度、偏好和已读取的文字结构。浏览器可能临时缓存少量媒体数据。</p>
             {storage && <span>当前站点约使用 {formatBytes(storage.usage)} / 可用配额 {formatBytes(storage.quota)}</span>}
           </aside>
         </main>

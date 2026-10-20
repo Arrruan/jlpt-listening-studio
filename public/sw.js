@@ -1,4 +1,4 @@
-const CACHE_NAME = 'jlpt-listening-studio-v3'
+const CACHE_NAME = 'jlpt-listening-studio-v4'
 const CORE = ['./', './index.html', './manifest.webmanifest', './icon.svg']
 
 self.addEventListener('install', (event) => {
@@ -19,6 +19,7 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url)
   if (url.origin !== self.location.origin) return
   if (url.pathname.includes('/api/local-library/')) return
+  if (url.pathname.includes('/api/library/') || url.pathname.includes('/api/media/')) return
 
   if (request.mode === 'navigate') {
     event.respondWith(
