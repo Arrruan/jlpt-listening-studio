@@ -97,6 +97,8 @@ audio/<audioAssetId>.<扩展名>
 
 Cloudflare 资源使用一个私有 R2 存储桶 `jlpt-listening-private` 和一个 Worker。Worker 同源提供 PWA、轻量题库元数据及 `/api/media/*` 音频接口；R2 不启用 `r2.dev`、Public access 或自定义公开域名。
 
+受 Cloudflare Access 保护的私人学习地址：<https://jlpt-listening-studio.164308219.workers.dev/>
+
 本机维护命令：
 
 ```powershell
